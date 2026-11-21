@@ -17,6 +17,7 @@ import {
   submitHandler,
 } from "./controllers/batchController";
 import { cancelHandler, publicKeyHandler, verifyHandler } from "./controllers/certificateController";
+import { importHandler } from "./controllers/importHandler";
 import { AppError } from "./lib/errors";
 import { logger } from "./lib/logger";
 
@@ -70,6 +71,8 @@ export function createApp() {
   app.post("/batches", requireAuth, wrap(createBatchHandler));
   app.get("/batches/:id", requireAuth, wrap(getBatchHandler));
   app.post("/batches/:id/candidates", requireAuth, wrap(addCandidatesHandler));
+  // Moment 1: CSV import. express.text reads the body as a string only for text/csv; 1mb is the file-size cap.
+  app.post("/batches/:id/import", requireAuth, express.text({ type: "text/csv", limit: "1mb" }), wrap(importHandler));
   app.post("/batches/:id/submit", requireAuth, wrap(submitHandler));
   app.post("/batches/:id/resubmit", requireAuth, wrap(resubmitHandler));
   app.post("/batches/:id/approve", requireAuth, wrap(approveHandler));
