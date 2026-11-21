@@ -1,0 +1,178 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  CENTRE_OPERATOR
+  DISTRICT_OFFICER
+  QUALITY_OFFICER
+  STATE_OFFICER
+  ADMIN
+}
+
+enum BatchStatus {
+  DRAFT
+  DISTRICT_REVIEW
+  QUALITY_REVIEW
+  STATE_REVIEW
+  APPROVED
+  ISSUING
+  ISSUED
+  CHANGES_REQUESTED
+  REJECTED
+}
+
+enum ReviewStep {
+  DISTRICT
+  QUALITY
+  STATE
+}
+
+enum CertificateStatus {
+  VALID
+  CANCELLED
+}
+
+enum OutboxStatus {
+  PENDING
+  PUBLISHED
+  DONE
+  FAILED
+}
+
+model User {
+  id         String   @id @default(uuid())
+  email      String   @unique
+  name       String
+  role       Role
+  districtId String?  @map("district_id")
+  centreId   String?  @map("centre_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  approvals Approval[]
+
+  @@map("users")
+}
+
+model Centre {
+  id         String   @id @default(uuid())
+  name       String
+  districtId String   @map("district_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  batches Batch[]
+
+  @@map("centres")
+}
+
+model Batch {
+  id          String      @id @default(uuid())
+  centreId    String      @map("centre_id")
+  districtId  String      @map("district_id")
+  course      String
+  status      BatchStatus @default(DRAFT)
+  // Bumped on resubmit after a send-back; only approvals with the same version count.
+  version     Int         @default(1)
+  size        Int         @default(0)
+  createdById String      @map("created_by_id")
+  submittedAt DateTime?   @map("submitted_at")
+  slaDueAt    DateTime?   @map("sla_due_at")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  centre       Centre        @relation(fields: [centreId], references: [id])
+  candidates   Candidate[]
+  approvals    Approval[]
+  certificates Certificate[]
+
+  @@index([status])
+  @@index([districtId, status])
+  @@map("batches")
+}
+
+model Candidate {
+  id        String   @id @default(uuid())
+  batchId   String   @map("batch_id")
+  name      String
+  phone     String
+  email     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  batch       Batch        @relation(fields: [batchId], references: [id])
+  certificate Certificate?
+
+  @@index([batchId])
+  @@map("candidates")
+}
+
+model Approval {
+  id        String     @id @default(uuid())
+  batchId   String     @map("batch_id")
+  version   Int
+  step      ReviewStep
+  officerId String     @map("officer_id")
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  batch   Batch @relation(fields: [batchId], references: [id])
+  officer User  @relation(fields: [officerId], references: [id])
+
+  @@unique([batchId, version, step, officerId])
+  @@map("approvals")
+}
+
+model AuditLog {
+  id         String       @id @default(uuid())
+  batchId    String?      @map("batch_id")
+  actorId    String?      @map("actor_id")
+  action     String
+  fromStatus BatchStatus? @map("from_status")
+  toStatus   BatchStatus? @map("to_status")
+  version    Int?
+  details    Json?
+  createdAt  DateTime     @default(now()) @map("created_at")
+
+  @@index([batchId, createdAt])
+  @@map("audit_log")
+}
+
+model OutboxEvent {
+  id             String       @id @default(uuid())
+  type           String
+  payload        Json
+  idempotencyKey String       @unique @map("idempotency_key")
+  status         OutboxStatus @default(PENDING)
+  attempts       Int          @default(0)
+  lastError      String?      @map("last_error")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  processedAt    DateTime?    @map("processed_at")
+
+  @@index([status, createdAt])
+  @@map("outbox_events")
+}
+
+model Certificate {
+  id          String            @id
+  candidateId String            @unique @map("candidate_id")
+  batchId     String            @map("batch_id")
+  number      String            @unique
+  course      String
+  issueDate   DateTime          @map("issue_date") @db.Date
+  status      CertificateStatus @default(VALID)
+  // Ed25519 signature (base64) over {id, number, course, issueDate}; never covers personal data.
+  signature   String
+  cancelledAt DateTime?         @map("cancelled_at")
+  cancelReason String?          @map("cancel_reason")
+  createdAt   DateTime          @default(now()) @map("created_at")
+
+  candidate Candidate @relation(fields: [candidateId], references: [id])
+  batch     Batch     @relation(fields: [batchId], references: [id])
+
+  @@index([batchId])
+  @@map("certificates")
+}
